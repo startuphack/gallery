@@ -1,0 +1,36 @@
+__pycache__
+/.git/
+/.cache/
+.idea/
+/venv/
+*.ldb/
+.DS_Store
+local.py
+config
+
+# Docs
+/docs/build
+/docs/publish
+/docs/source/modules
+
+# Tests
+/test/
+catboost_training.json
+*.tsv
+/.pytest_cache/
+
+# Package build
+/.eggs/
+/ml_tools.egg-info/
+/build/
+/dist/
+
+# Tests coverage
+.coverage
+/htmlcov/
+
+# Pytest report
+/assets/
+report.html
+
+# Big files
