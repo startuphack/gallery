@@ -12,7 +12,7 @@ if __name__ == '__main__':
         forecast = pickle.load(predictions_stream)
     base_schedule = parse_inventory(resources_path / 'inventory.xlsx', resources_path / 'player_details.csv')
 
-    schedule = Schedule(base_schedule)
+    schedule = Schedule(base_schedule, chunk_size = 3)
 
     advertisement_schedule = schedule.make_advertisement_schedule(
         screen_ids=[257],

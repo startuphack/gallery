@@ -29,7 +29,7 @@ class Schedule(ABC):
     '''
 
     def __init__(self, planned_schedule: dict,
-                 chunk_size=7,
+                 chunk_size=3,
                  penalty_rate=1e-5,
                  tz=pytz.timezone('Asia/Novosibirsk'),
                  ):
