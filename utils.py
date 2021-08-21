@@ -13,6 +13,13 @@ DEFAULT_TZ = pytz.timezone('Asia/Novosibirsk')
 
 
 def parse_inventory(inventory_file, screen_file, tz=DEFAULT_TZ):
+    '''
+    Загружить данные рекламных слотов по билбордам в пригодный для дальнейшей обработки вид
+    :param inventory_file: файл с билбордами(inventory.xlsx)
+    :param screen_file: файл с Id билбордов player_details.csv
+    :param tz: временная зона, для которой требуется построение расписания
+    :return: данные по свободным рекламным слотам
+    '''
     player_ids_dict = pd.read_csv(screen_file, delimiter=';', index_col='PlayerNumber').to_dict()['PlayerId']
     inventory_df = pd.read_excel(
         inventory_file,
@@ -88,6 +95,10 @@ WEEKDAYS = [
 
 
 class SchedulePrinter:
+    '''
+    Класс для печати расписаний в excel файл
+    '''
+
     def __init__(
         self,
         template_path,
@@ -95,8 +106,14 @@ class SchedulePrinter:
         plan_date_start,
         plan_date_stop,
         tz=DEFAULT_TZ,
-
     ):
+        '''
+        :param template_path: файл шаблона plan_template.xlsx
+        :param player_details_path: данные о билбордах
+        :param plan_date_start: дата начала расписания
+        :param plan_date_stop: дата окончания расписания
+        :param tz: временная зона
+        '''
         self.template_path = template_path
         self.timezone = tz
         self.player_details_path = player_details_path
@@ -116,6 +133,11 @@ class SchedulePrinter:
                 break
 
     def truncate_schedule(self, schedule):
+        '''
+        Обрезать расписание с точностью до дней
+        :param schedule: расписание
+        :return: расписание, урезанное с точностью до дней
+        '''
         result = defaultdict(lambda: defaultdict(lambda: {'slots': 0, 'ots': 0}))
         for screen_id, screen_ts_items in schedule.items():
             screen_name = self.player_id_to_name[screen_id]
@@ -128,6 +150,12 @@ class SchedulePrinter:
         return dict(result)
 
     def write_schedule(self, schedule, filename=None):
+        '''
+        Сгенерировать excel workbook с расписанием
+        :param schedule: сгенерированное расписание
+        :param filename: файл с расписанием
+        :return: excel workbook с расписанием
+        '''
         workbook = load_workbook(filename=self.template_path)
         ots_sheet = workbook['Медиаплан по OTS']
 

@@ -8,11 +8,14 @@ from utils import parse_inventory, DEFAULT_TZ, SchedulePrinter
 resources_path = pathlib.Path(__file__).parent / 'resources'
 
 if __name__ == '__main__':
+    # Загружаем сохраненные прогнозы
     with open(str(resources_path / 'predictions_new.pkl'), 'rb') as predictions_stream:
         forecast = pickle.load(predictions_stream)
+    # Парсим информацию о свободных слотах
     base_schedule = parse_inventory(resources_path / 'inventory.xlsx', resources_path / 'player_details.csv')
 
-    schedule = Schedule(base_schedule, chunk_size = 7)
+    # Создаем расписание
+    schedule = Schedule(base_schedule)
 
     advertisement_schedule = schedule.make_advertisement_schedule(
         screen_ids=[257],
