@@ -73,7 +73,7 @@ class Schedule(ABC):
 
             for screen_forecast_ts, screen_forecast_ots in sorted(screen_forecast_data.items()):
                 screen_forecast_dt = datetime.fromtimestamp(screen_forecast_ts, tz=self.tz)
-                logging.info(screen_forecast_dt)
+                # print(start_date, end_date, screen_forecast_dt, screen_forecast_dt.hour, screen_forecast_dt.weekday(), start_date <= screen_forecast_dt < end_date)
                 if (
                     (start_date <= screen_forecast_dt < end_date)
                     and (screen_forecast_dt.hour in hours)
@@ -121,7 +121,7 @@ class Schedule(ABC):
 
             return {
                 'schedule': schedule,
-                'ots-forecast': math.round(result_ots)
+                'ots-forecast': round(result_ots)
             }
         else:
             raise ValueError(f'unsupported optimization mode {self.optimization_mode}')
@@ -141,7 +141,7 @@ class Schedule(ABC):
         objectives = list()
 
         model = cp_model.CpModel()
-        for chunk_group in chunk_groups:
+        for group_num, chunk_group in enumerate(chunk_groups):
             num_slots = chunk_group[0]['remains_slots']
             group_total_ots = sum(group['forecast_ots'] for group in chunk_group)
             domain = cp_model.Domain.FromIntervals(
@@ -149,7 +149,7 @@ class Schedule(ABC):
                 + [[num_slots, num_slots]]
             )
 
-            x_var = model.NewIntVarFromDomain(domain, f'{num_slots};{group_total_ots}')
+            x_var = model.NewIntVarFromDomain(domain, f'{num_slots};{group_total_ots};{group_num}')
             x.append(x_var)
             penalty = (num_slots - x_var)
             chunk_obj = x_var * group_total_ots  # * OTS_PER_HOUR_MULTIPLIER

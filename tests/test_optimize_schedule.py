@@ -1,12 +1,11 @@
-import pytz
 from datetime import datetime
+
+import pytz
+
 from make_schedule import Schedule
-import logging
-
-logging.basicConfig(filename='debug.log', format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 
-def test_make_schedule(schedule_plan_data):
+def test_make_schedule_3600(schedule_plan_data):
     forecast = schedule_plan_data['predictions']
     base_schedule = schedule_plan_data['schedule']
     schedule = Schedule(base_schedule)
@@ -14,14 +13,55 @@ def test_make_schedule(schedule_plan_data):
     advertisement_schedule = schedule.make_advertisement_schedule(
         screen_ids=[257],
         desired_ots=3600,
-        start_date=datetime(2021, 9, 1, tzinfo=tz),
-        end_date=datetime(2021, 10, 1, tzinfo=tz),
+        start_date=tz.localize(datetime(2021, 9, 6)),
+        end_date=tz.localize(datetime(2021, 9, 7)),
         week_days=[0],
-        hours=[1, 3, 5],
+        hours=[1],
         frequency=72,
         ots_forecast=forecast,
     )
 
-    print(advertisement_schedule)
+    assert advertisement_schedule['ots-forecast'] == 3602
+    unique_appropriate_day = tz.localize(datetime(2021, 9, 6, 1)).timestamp()
+    assert advertisement_schedule['schedule'][257][unique_appropriate_day]['slots'] == 60
 
-    print(schedule_plan_data.keys())
+
+def test_make_schedule_4600(schedule_plan_data):
+    forecast = schedule_plan_data['predictions']
+    base_schedule = schedule_plan_data['schedule']
+    schedule = Schedule(base_schedule)
+    tz = pytz.timezone('Asia/Novosibirsk')
+    advertisement_schedule = schedule.make_advertisement_schedule(
+        screen_ids=[257],
+        desired_ots=4600,
+        start_date=tz.localize(datetime(2021, 9, 6)),
+        end_date=tz.localize(datetime(2021, 9, 7)),
+        week_days=[0],
+        hours=[1],
+        frequency=72,
+        ots_forecast=forecast,
+    )
+
+    assert advertisement_schedule['ots-forecast'] == 4322
+    assert advertisement_schedule['schedule'] is None
+
+
+def test_make_schedule_2600(schedule_plan_data):
+    forecast = schedule_plan_data['predictions']
+    base_schedule = schedule_plan_data['schedule']
+    schedule = Schedule(base_schedule)
+    tz = pytz.timezone('Asia/Novosibirsk')
+    advertisement_schedule = schedule.make_advertisement_schedule(
+        screen_ids=[257],
+        desired_ots=2600,
+        start_date=tz.localize(datetime(2021, 9, 6)),
+        end_date=tz.localize(datetime(2021, 9, 7)),
+        week_days=[0],
+        hours=[1],
+        frequency=72,
+        ots_forecast=forecast,
+    )
+
+    assert advertisement_schedule['ots-forecast'] == 2881
+    unique_appropriate_day = tz.localize(datetime(2021, 9, 6, 1)).timestamp()
+    assert advertisement_schedule['schedule'][257][unique_appropriate_day]['slots'] == 48
