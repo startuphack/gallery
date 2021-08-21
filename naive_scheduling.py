@@ -27,7 +27,7 @@ def schedule_simple(forecast, schedule, screen_ids, desired_ots, start_date, end
                 if schedule[screen_id][slot] >= frequency and
                    (slot, screen_id) not in planned
             ]
-            otses = {screen_id: forecast[screen_id][ts] for screen_id in available_screens}
+            otses = {screen_id: forecast[screen_id][ts] * (frequency / 72) for screen_id in available_screens}
 
             bigger_otses = {screen_id: ots for screen_id, ots in otses.items() if ots > mean_hour_ots}
             if bigger_otses:
@@ -39,6 +39,9 @@ def schedule_simple(forecast, schedule, screen_ids, desired_ots, start_date, end
                 ots = otses[screen_id]
 
             planned[(slot, screen_id)] = ots
+            if sum(planned.values()) >= desired_ots:
+                break
+
             if n < len(slots):
                 mean_hour_ots = float(desired_ots - sum(planned.values())) / (len(slots) - n)
 
