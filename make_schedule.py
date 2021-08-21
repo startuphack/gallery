@@ -1,14 +1,13 @@
-import math
-from datetime import datetime
-import pytz
 import itertools as it
-from operator import itemgetter
-from collections import defaultdict
-from abc import ABC
 import typing
+from abc import ABC
+from collections import defaultdict
+from datetime import datetime
+from operator import itemgetter
+
 import more_itertools as mit
+import pytz
 from ortools.sat.python import cp_model
-import logging
 
 # Стандартные чстоты показов
 STANDARD_FREQUENCIES = frozenset([
@@ -21,14 +20,26 @@ OTS_PER_HOUR_MULTIPLIER = 1 / HOUR_SLOT_COUNT
 
 
 class Schedule(ABC):
+    '''
+    Этот класс представляет собой модуль, отвечающий за расписание
+    Предполагается, что есть базовая информация о том, какие слоты заняты другими рекламными кампаниями
+    Этот класс умеет строить расписание по требованиям рекламной кампании см make_advertisement_schedule
+    Кроме того, нужна информация о временной зоне того места, для которого необходимо построение расписания
+    '''
+
     def __init__(self, planned_schedule: dict,
-                 optimization_mode='frequencies',
                  chunk_size=7,
                  penalty_rate=1e-5,
                  tz=pytz.timezone('Asia/Novosibirsk'),
                  ):
+        '''
+        :param planned_schedule: текущее расписание активных рекламных кампаний
+        :param chunk_size: размер пачки для группировки активных часов строящегося расписания.
+            чем он меньше, тем точнее будет подгоняться OTS нового расписания к желаемому, но тем дольше это будет происходить
+        :param penalty_rate: уровень штрафа за неравномерность показа рекламы по билбордам. чем больше, тем более равномерно будут распределены показы
+        :param tz: временная зона для определения часов
+        '''
         self.planned_schedule = planned_schedule
-        self.optimization_mode = optimization_mode
         self.chunk_size = chunk_size
         self.penalty_rate = penalty_rate
         self.tz = tz
@@ -43,7 +54,6 @@ class Schedule(ABC):
         hours: typing.Collection[int],
         frequency: int,
         ots_forecast,  # Сюда надо поставить дикт диктов
-
     ):
         '''
         :param screen_ids: Идентификаторы экранов
@@ -64,6 +74,8 @@ class Schedule(ABC):
 
         available_ots = 0
         all_screens = list()
+
+        # На этом шаге мы выделяем рекламные часовые слоты, для которых мы будем подбирать параметр по частоте.
         for screen_id in screen_ids:
             screen_slots = list()
             planned_ots = self.planned_schedule.get(screen_id, {})
@@ -96,22 +108,30 @@ class Schedule(ABC):
 
             all_screens.append(screen_slots)
 
+        # В случае, сумма OTS по всем доступным слотам меньше требуемой OTS, мы не можем сформировать расписание.
+        # В этом случае возвращаем None в schedule
         if available_ots < desired_ots:
             return {
                 'schedule': None,
                 'ots-forecast': available_ots,
             }
-        elif self.optimization_mode == 'frequencies':
+        else:
+            # Запускаем целочисленную линейную оптимизацию для поиска частот показов на экранах
             slot_list = self.do_mip_optimization_on_frequencies(all_screens, desired_ots)
+
+            # Здесь у нас уже есть вся инфа о том, когда, на каком экране, и на сколько слотов показывать рекламу.
+            # Можем сформировать расписание и уточнить OTS
             schedule = defaultdict(dict)
             result_ots = 0
             for screen_chunk_event in slot_list:
                 screen_id = screen_chunk_event['screen']
                 hour = screen_chunk_event['hour_ts']
                 # remains_slots = screen_chunk_event['remains_slots']
-                slots = screen_chunk_event['target_slots']
+                slots = screen_chunk_event['target_slots']  # необходимое число слотов, которое мы должны занять
 
-                forecast_ots = screen_chunk_event['forecast_ots']
+                forecast_ots = screen_chunk_event['forecast_ots']  # прогнозный часовой OTS
+
+                # пересчитываем OTS на число слотов и добавляем к общей сумме
                 result_ots += forecast_ots * slots * OTS_PER_HOUR_MULTIPLIER
 
                 schedule[screen_id][hour] = {
@@ -123,27 +143,41 @@ class Schedule(ABC):
                 'schedule': schedule,
                 'ots-forecast': round(result_ots)
             }
-        else:
-            raise ValueError(f'unsupported optimization mode {self.optimization_mode}')
 
     def do_mip_optimization_on_frequencies(self, all_screens, desired_ots):
+        '''
+        Здесь мы формулируем задачу целочисленного линейного программирования с ограничениями
+        :param all_screens: информация о всех доступных слотах всех экранах
+        :param desired_ots: требуемое кол-во OTS от рекламной кампании
+        :return: информация о всех слотах, которые мы должны занять
+        '''
 
         chunk_groups = list()
+        # мы группируем все часовые интервалы, где можем разместить рекламу по числу оставшихся слотов
         for slot_size, slot_group in it.groupby(
             sorted(it.chain.from_iterable(all_screens), key=itemgetter('remains_slots')),
             itemgetter('remains_slots')
         ):
+            # каждую группу разбиваем на чанки. это нужно для того, чтобы сократить размерность задачи
             group_chunks = mit.chunked(slot_group, self.chunk_size)
             chunk_groups.extend(group_chunks)
 
-        x = list()
-        penalties = list()
-        objectives = list()
+        x = list()  # параметры задачи - сколько слотов в час занимаем
+        penalties = list()  # штрафы задачи - насколько мы отклонямся от желаемого числа слотов
+        objectives = list()  # данные OTS по занятым рекламным слотам
 
         model = cp_model.CpModel()
         for group_num, chunk_group in enumerate(chunk_groups):
+            # у нас есть группировка по доступным слотам.
+            # для каждой группы у нас есть 1 параметр - число показов в час
+            # число OTS для группы в этом случае будет равно
+            # OTS_GROUP = OTS1 * SLOTS1 / 72 + ... + OTSn*SLOTSn / 72
+            # но SLOTS1==...==SLOTSn = SLOTS. поэтому
+            # OTS_GROUP = (OTS1 + ... + OTSn) * SLOTS / 72
             num_slots = chunk_group[0]['remains_slots']
+            # (OTS1 + ... + OTSn)
             group_total_ots = sum(group['forecast_ots'] for group in chunk_group)
+            # домен у нас состоит из допустимых стандартных частот + мы можем занять полностью текущий оставшийся слот
             domain = cp_model.Domain.FromIntervals(
                 [[v, v] for v in STANDARD_FREQUENCIES if v < num_slots]
                 + [[num_slots, num_slots]]
@@ -151,21 +185,27 @@ class Schedule(ABC):
 
             x_var = model.NewIntVarFromDomain(domain, f'{num_slots};{group_total_ots};{group_num}')
             x.append(x_var)
+            # добавляем штраф
             penalty = (num_slots - x_var)
+            # Чтобы не выходить за границы целочисленной оптимизации, делим все переменные на OTS_PER_HOUR_MULTIPLIER
+            # Линейная задача от этого не изменится
             chunk_obj = x_var * group_total_ots  # * OTS_PER_HOUR_MULTIPLIER
             penalties.append(penalty)
             objectives.append(chunk_obj)
 
-        model.Add(sum(objectives) >= desired_ots * int(
-            1 / OTS_PER_HOUR_MULTIPLIER))  # нам нужно набрать не меньше желаемого кол-ва ОТС
+        # Нам нужно, чтобы OTS >= desired_ots, но у нас все objectives поделены на OTS_PER_HOUR_MULTIPLIER,
+        # Значит и констрейнт нужно поправить как OTS/OTS_PER_HOUR_MULTIPLIER >= desired_ots/OTS_PER_HOUR_MULTIPLIER
+        model.Add(sum(objectives) >= desired_ots * int(1 / OTS_PER_HOUR_MULTIPLIER))
 
+        # Наша задача - минимизировать излишки, не слишком сильно отступая от желаемых параметров по частотам
+        # Делим задачу на penalty_rate. иначе выходим за границу линейной целочисленной задачи
         model.Minimize(
             sum(objectives) * int(1 / self.penalty_rate) + sum(penalties))  # нам нужно минимизировать кол-во ОТС
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
 
-        # Print solution.
+        # Если найдено оптимальное решение, проставляем параметры по числу слотов, которое нужно занять рекламным блоком
         if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
             chunk_result = list()
             for chunk_var, chunk_group in zip(x, chunk_groups):
