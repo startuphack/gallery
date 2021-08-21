@@ -1,4 +1,5 @@
 import itertools as it
+import time
 import typing
 from abc import ABC
 from collections import defaultdict
@@ -117,7 +118,9 @@ class Schedule(ABC):
             }
         else:
             # Запускаем целочисленную линейную оптимизацию для поиска частот показов на экранах
+            ns_start = time.time_ns()
             slot_list = self.do_mip_optimization_on_frequencies(all_screens, desired_ots)
+            ns_stop = time.time_ns()
 
             # Здесь у нас уже есть вся инфа о том, когда, на каком экране, и на сколько слотов показывать рекламу.
             # Можем сформировать расписание и уточнить OTS
@@ -141,7 +144,8 @@ class Schedule(ABC):
 
             return {
                 'schedule': schedule,
-                'ots-forecast': round(result_ots)
+                'ots-forecast': round(result_ots),
+                'optimization-time-ms': (ns_stop - ns_start) / 1e6,
             }
 
     def do_mip_optimization_on_frequencies(self, all_screens, desired_ots):

@@ -136,7 +136,7 @@ class SchedulePrinter:
         schedule_rows = list(normalized_schedule.items())
         background_cell = ots_sheet['b7']
         for rownum, row in enumerate(
-            ots_sheet.iter_rows(min_row=6, max_row=len(schedule) + 6, min_col=2, max_col=len(self.days) + 2)):
+            ots_sheet.iter_rows(min_row=6, max_row=len(schedule) + 6 - 1, min_col=2, max_col=len(self.days) + 2)):
             if rownum == 0:
                 for cell, cell_date in zip(row[1:], self.days):
                     cell.value = cell_date.strftime(f'%d.%m.%Y')

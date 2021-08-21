@@ -36,6 +36,6 @@ report.html
 
 # Big files
 
-resources/predictions*pkl
+#resources/predictions*pkl
 resources/inventory.xlsx
 resources/player_details.csv
