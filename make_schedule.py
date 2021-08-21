@@ -1,4 +1,6 @@
+import math
 from datetime import datetime
+import pytz
 import itertools as it
 from operator import itemgetter
 from collections import defaultdict
@@ -18,19 +20,18 @@ HOUR_SLOT_COUNT = max(STANDARD_FREQUENCIES)  # число слотов в одн
 OTS_PER_HOUR_MULTIPLIER = 1 / HOUR_SLOT_COUNT
 
 
-# def slots_to_ots(ots_per_hour):
-#     return ots_per_hour/HOUR_SLOT_COUNT
-
 class Schedule(ABC):
     def __init__(self, planned_schedule: dict,
                  optimization_mode='frequencies',
                  chunk_size=7,
-                 penalty_rate=1e-5
+                 penalty_rate=1e-5,
+                 tz=pytz.timezone('Asia/Novosibirsk'),
                  ):
         self.planned_schedule = planned_schedule
         self.optimization_mode = optimization_mode
         self.chunk_size = chunk_size
         self.penalty_rate = penalty_rate
+        self.tz = tz
 
     def make_advertisement_schedule(
         self,
@@ -71,7 +72,7 @@ class Schedule(ABC):
                 raise ValueError(f'нет плана для экрана {screen_id}')
 
             for screen_forecast_ts, screen_forecast_ots in sorted(screen_forecast_data.items()):
-                screen_forecast_dt = datetime.fromtimestamp(screen_forecast_ts)
+                screen_forecast_dt = datetime.fromtimestamp(screen_forecast_ts, tz=self.tz)
                 logging.info(screen_forecast_dt)
                 if (
                     (start_date <= screen_forecast_dt < end_date)
@@ -79,7 +80,7 @@ class Schedule(ABC):
                     and (screen_forecast_dt.weekday() in week_days)
                 ):
                     # столько слотов осталось
-                    remains = planned_ots.get(screen_forecast_ts, HOUR_SLOT_COUNT)
+                    remains = planned_ots.get(screen_forecast_dt, HOUR_SLOT_COUNT)
 
                     screen_slots.append({
                         'screen': screen_id,
@@ -120,89 +121,10 @@ class Schedule(ABC):
 
             return {
                 'schedule': schedule,
-                'ots-forecast': result_ots
+                'ots-forecast': math.round(result_ots)
             }
         else:
-
-            chunk_matrix = self.do_mip_optimization_on_screens(all_screens, desired_ots)
-
-            schedule = defaultdict(dict)
-            result_ots = 0
-
-            for screen in chunk_matrix:
-                for screen_chunk in screen:
-                    for screen_chunk_event in screen_chunk:
-                        screen_id = screen_chunk_event['screen']
-                        hour = screen_chunk_event['hour_ts']
-                        slots = screen_chunk_event['remains_slots']
-                        forecast_ots = screen_chunk_event['forecast_ots']
-                        slot_ots = forecast_ots * slots * OTS_PER_HOUR_MULTIPLIER
-                        schedule[screen_id][hour] = {
-                            'slots': slots,
-                            'ots': slot_ots
-                        }
-                        result_ots += slot_ots
-
-            return {
-                'schedule': schedule,
-                'ots-forecast': result_ots
-            }
-
-    def do_mip_optimization_on_screens(self, all_screens, desired_ots):
-        chunked_screens = [list(mit.chunked(screen_slots, self.chunk_size)) for screen_slots in all_screens]
-
-        num_screens = len(chunked_screens)
-        num_chunks = len(chunked_screens[0])
-        model = cp_model.CpModel()
-
-        x = []
-        ots_chunks = []
-        for i, screen_data in enumerate(chunked_screens):
-            t = []
-            screen_ots_data_by_chunks = []
-            for j, screen_event in enumerate(screen_data):
-                t.append(model.NewBoolVar(f'x[{i},{j}]'))
-                chunk_ots_count = 0
-                for chunk_event in screen_event:
-                    chunk_ots_count += chunk_event['forecast_ots'] * chunk_event[
-                        'remains_slots'] * OTS_PER_HOUR_MULTIPLIER
-
-                screen_ots_data_by_chunks.append(chunk_ots_count)
-
-            x.append(t)
-            ots_chunks.append(screen_ots_data_by_chunks)
-
-        # Objective
-        objective_terms = []
-        for i in range(num_screens):
-            for j in range(num_chunks):
-                objective_terms.append(ots_chunks[i][j] * x[i][j])
-
-        # показываем рекламу все время хотя бы на одном билборде
-        for j in range(num_chunks):
-            model.Add(sum(x[i][j] for i in range(num_screens)) >= 1)
-        model.Add(sum(objective_terms) >= desired_ots)  # нам нужно набрать не меньше желаемого кол-ва ОТС
-
-        model.Minimize(sum(objective_terms))  # нам нужно минимизировать кол-во ОТС
-
-        solver = cp_model.CpSolver()
-        status = solver.Solve(model)
-
-        # Print solution.
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            result_ots = solver.ObjectiveValue()
-            chunk_matrix = []
-
-            for i, screen_data in enumerate(chunked_screens):
-                screen_values = []
-                for j, screen_chunk in enumerate(screen_data):
-                    chunk_decision = solver.BooleanValue(x[i][j])
-                    if chunk_decision:
-                        screen_values.append(screen_chunk)
-                chunk_matrix.append(screen_values)
-            return chunk_matrix
-        else:
-            return None
+            raise ValueError(f'unsupported optimization mode {self.optimization_mode}')
 
     def do_mip_optimization_on_frequencies(self, all_screens, desired_ots):
 
