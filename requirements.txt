@@ -4,3 +4,4 @@ prophet
 pyarrow
 ortools
 more_itertools
+pytest
