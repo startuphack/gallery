@@ -1,14 +1,18 @@
 import gzip
 import io
-import pytz
-from datetime import datetime, timedelta
 import pickle
 from collections import defaultdict
+from copy import copy
+from datetime import datetime, timedelta
 
 import pandas as pd
+import pytz
+from openpyxl import load_workbook
+
+DEFAULT_TZ = pytz.timezone('Asia/Novosibirsk')
 
 
-def parse_inventory(inventory_file, screen_file, tz=pytz.timezone('Asia/Novosibirsk')):
+def parse_inventory(inventory_file, screen_file, tz=DEFAULT_TZ):
     player_ids_dict = pd.read_csv(screen_file, delimiter=';', index_col='PlayerNumber').to_dict()['PlayerId']
     inventory_df = pd.read_excel(
         inventory_file,
@@ -72,4 +76,106 @@ HOLIDAYS = [
     '2021-12-31',
 ]
 
+WEEKDAYS = [
+    'пн',
+    'вт',
+    'ср',
+    'чт',
+    'пт',
+    'сб',
+    'вс',
+]
 
+
+class SchedulePrinter:
+    def __init__(
+        self,
+        template_path,
+        player_details_path,
+        plan_date_start,
+        plan_date_stop,
+        tz=DEFAULT_TZ,
+
+    ):
+        self.template_path = template_path
+        self.timezone = tz
+        self.player_details_path = player_details_path
+        player_data = pd.read_csv(player_details_path, delimiter=';')
+        self.player_name_to_ids = player_data.set_index('PlayerNumber').to_dict()['PlayerId']
+        self.player_id_to_name = player_data.set_index('PlayerId').to_dict()['PlayerNumber']
+        self.plan_date_start = plan_date_start
+        self.plan_date_stop = plan_date_stop
+
+        self.days = list()
+        current_date = plan_date_start
+        while True:
+            self.days.append(current_date.date())
+            current_date += timedelta(days=1)
+
+            if current_date >= plan_date_stop:
+                break
+
+    def truncate_schedule(self, schedule):
+        result = defaultdict(lambda: defaultdict(lambda: {'slots': 0, 'ots': 0}))
+        for screen_id, screen_ts_items in schedule.items():
+            screen_name = self.player_id_to_name[screen_id]
+            for screen_ts, screen_ts_data in screen_ts_items.items():
+                screen_date = datetime.fromtimestamp(screen_ts, tz=self.timezone).date()
+
+                result[screen_name][screen_date]['slots'] += screen_ts_data['slots']
+                result[screen_name][screen_date]['ots'] += screen_ts_data['ots']
+
+        return dict(result)
+
+    def write_schedule(self, schedule, filename=None):
+        workbook = load_workbook(filename=self.template_path)
+        ots_sheet = workbook['Медиаплан по OTS']
+
+        normalized_schedule = self.truncate_schedule(schedule['schedule'])
+
+        schedule_rows = list(normalized_schedule.items())
+        background_cell = ots_sheet['b7']
+        for rownum, row in enumerate(
+            ots_sheet.iter_rows(min_row=6, max_row=len(schedule) + 6, min_col=2, max_col=len(self.days) + 2)):
+            if rownum == 0:
+                for cell, cell_date in zip(row[1:], self.days):
+                    cell.value = cell_date.strftime(f'%d.%m.%Y')
+                    cell.fill = copy(background_cell.fill)
+            elif rownum == 1:
+                for cell, cell_date in zip(row[1:], self.days):
+                    cell.value = WEEKDAYS[cell_date.weekday()]
+                    cell.fill = copy(background_cell.fill)
+            else:
+                screen_data = schedule_rows[rownum - 2]
+                screen_id = screen_data[0]
+                row[0].value = screen_id
+
+                for cell, cell_date in zip(row[1:], self.days):
+                    #             print(cell_date)
+                    ots = screen_data[1].get(cell_date, {}).get('ots')
+                    if ots:
+                        cell.value = round(ots)
+
+        slots_sheet = workbook['Медиаплан по показам']
+
+        for rownum, row in enumerate(slots_sheet.iter_rows(min_row=3, min_col=1, max_col=50)):
+            row_date = self.timezone.localize(datetime.strptime(row[0].value, '%Y-%m-%d'))
+
+            board_name = row[3].value
+            board_id = int(self.player_name_to_ids[board_name])
+
+            board_date_data = schedule['schedule'].get(board_id)
+            if board_date_data:
+                total_hour_value = 0
+                for hour in range(24):
+                    column_stamp = int((row_date + timedelta(hours=hour)).timestamp())
+                    hour_data = board_date_data.get(column_stamp)
+                    if hour_data:
+                        row[5 + 1 + hour].value = hour_data['slots']
+                        total_hour_value += hour_data['slots']
+                if total_hour_value:
+                    row[5].value = total_hour_value
+        if filename:
+            workbook.save(filename=filename)
+
+        return workbook
