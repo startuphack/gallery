@@ -15,11 +15,11 @@ if __name__ == '__main__':
     base_schedule = parse_inventory(resources_path / 'inventory.xlsx', resources_path / 'player_details.csv')
 
     # Создаем расписание
-    schedule = Schedule(base_schedule)
+    schedule = Schedule(base_schedule, chunk_size=50)
 
     advertisement_schedule = schedule.make_advertisement_schedule(
         screen_ids=[257],
-        desired_ots=67812,
+        desired_ots=177812,
         start_date=DEFAULT_TZ.localize(datetime(2021, 9, 1)),
         end_date=DEFAULT_TZ.localize(datetime(2021, 10, 1)),
         week_days=list(range(0, 7)),

@@ -1,6 +1,7 @@
 import datetime as dt
 import pathlib
 import pickle
+import logging
 
 import numpy as np
 import pandas as pd
@@ -15,10 +16,14 @@ def build_df(crowd_dir):
     Итоговый датафрейм будет содержать время начала каждого часового слота, ID плеера и кол-во mac-адресов за этот слот
     :param crowd_dir: путь к директории с parquet-файлами
     '''
-    df = pd.DataFrame(names=['date_hour', 'mac_count', 'player_id'])
+    df = pd.DataFrame(columns=['date_hour', 'mac_count', 'player_id'])
+
+    logging.info(f'working with {crowd_dir}')
 
     for player_dir in pathlib.Path(crowd_dir).glob('player=*'):
+        logging.info(f'working with {player_dir}')
         for f in player_dir.glob('*.parquet'):
+            logging.info(f'loading crowd data from {f}')
             player_id = int(f.parent.stem.split('=')[1])
             part = pd.read_parquet(f)
 
@@ -37,11 +42,13 @@ def build_df(crowd_dir):
                 .sort_index()
                 .reset_index()
             )
+            logging.info(f'loading crowd data from f')
 
     return df
 
 
 def get_admetrix_data(admetrix_data_path, player_details_path):
+    logging.info(f'loading admetrix data from {admetrix_data_path}')
     admetrix = pd.read_excel(admetrix_data_path)
     player_details = pd.read_csv(player_details_path, delimiter=';')
     admetrix = admetrix.merge(player_details, left_on='ID экрана', right_on='PlayerNumber')
@@ -52,6 +59,8 @@ def get_admetrix_data(admetrix_data_path, player_details_path):
         return dt.date(int(year), months.index(month) + 1, 1)
 
     admetrix['month'] = admetrix['Период'].map(get_month)
+
+    logging.info(f'admetrix data complete')
     return admetrix
 
 
@@ -102,11 +111,12 @@ def predict_ots(
         if not X['admetrix'].isnull().any():
             m.add_regressor('admetrix')
 
+        logging.info(f'training prophet for {player_id}')
         m.fit(X)
         n_hours_to_predict = (pd.Timestamp(horizon) - X.ds.max()).days * 24
         future = m.make_future_dataframe(periods=n_hours_to_predict, freq='H')
         future['admetrix'] = future.ds.map(get_admetrix_ots)
-
+        logging.info(f'making predictions prophet for {player_id}')
         forecast = m.predict(future)
 
         # Убираем выбросы
@@ -126,6 +136,8 @@ def predict_ots(
 
 
 if __name__ == '__main__':
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
+
     data_dir = pathlib.Path('/home/gallery/data/')
     out_dir = pathlib.Path('/home/gallery/our_data/')
 
@@ -172,5 +184,7 @@ if __name__ == '__main__':
         changepoints=changepoints,
         horizon='2021-09-30',
     )
+
+    logging.info(f'writing predictions to {predictions.pkl}')
     with (out_dir / 'predictions.pkl').open('wb') as f:
         pickle.dump(predictions, f)
